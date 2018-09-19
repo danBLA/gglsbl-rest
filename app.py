@@ -36,6 +36,24 @@ def _lookup(url, api_key, retry=1):
         else:
             return _lookup(url, api_key, retry + 1)
 
+def _randomlookup(api_key, retry=1):
+    # perform lookup
+    global sbl, last_api_key
+    try:
+        if api_key != last_api_key:
+            app.logger.info('re-opening database')
+            sbl = SafeBrowsingList(api_key, dbfile, True)
+            last_api_key = api_key
+        return sbl.lookup_random_hash()
+    except:
+        app.logger.exception("exception handling [random lookup]")
+        if retry >= max_retries:
+            sbl = None
+            last_api_key = None
+            abort(500)
+        else:
+            return _randomlookup(api_key, retry + 1)
+
 
 @app.route('/gglsbl/lookup/<path:url>', methods=['GET'])
 @app.route('/gglsbl/v1/lookup/<path:url>', methods=['GET'])
@@ -74,6 +92,24 @@ def status_page():
         }]
     }
     return jsonify(retval)
+
+@app.route('/gglsbl/random', methods=['GET'])
+@app.route('/gglsbl/v1/random', methods=['GET'])
+def app_randomlookup():
+    # find out which API key to use
+    api_key = request.headers.get('x-gsb-api-key', gsb_api_key)
+    if not api_key:
+        app.logger.error('no API key to use')
+        abort(401)
+
+    # look up URL
+    resp = _randomlookup(api_key)
+    if resp:
+        matches = [{'threat': x.threat_type, 'platform': x.platform_type,
+                    'threat_entry': x.threat_entry_type} for x in resp]
+        return jsonify({'url': "randomlookup", 'matches': matches})
+    else:
+        abort(404)
 
 
 # run internal Flask server if executed directly
